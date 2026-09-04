@@ -268,6 +268,7 @@ python main.py</pre>
 <table class="ctl">
 <tr><th>控件</th><th>类型</th><th>功能说明</th></tr>
 <tr><td>数据格式（printf 风格）</td><td>输入框</td><td>定义如何从接收数据流中解析各通道数值。使用 printf 格式符，如 <code>ch1:%fmv,ch2:%fmv</code> 表示解析 ch1 和 ch2 的浮点值（单位 mV）。支持 %f（浮点）、%d（整数）、%x（十六进制）等格式。通道名与单位自动解析。</td></tr>
+<tr><td>自动识别</td><td>按钮</td><td>分析当前通讯接口最近收到的数据行，自动推断其中的 printf 风格格式串，并写入左侧格式输入框。仅写入格式框、不自动应用；点击右侧「应用并重绘」后按新格式重新解析并绘制波形。适用于数据格式未知、需快速确认解析方案的情形。</td></tr>
 <tr><td>应用并重绘</td><td>按钮</td><td>应用数据格式设置并重新解析已有数据、重绘波形。</td></tr>
 <tr><td>已识别通道</td><td>标签</td><td>显示当前数据格式中识别到的通道列表（如 "已识别 8 个数值通道：ch1, ch2, ..., ch8"）。</td></tr>
 </table>
@@ -661,6 +662,7 @@ python main.py</pre>
 <table class="ctl">
 <tr><th>Control</th><th>Type</th><th>Description</th></tr>
 <tr><td>Data Format (printf-style)</td><td>Input</td><td>Defines how to parse channel values from the received data stream. Uses printf format specifiers, e.g., <code>ch1:%fmv,ch2:%fmv</code> parses ch1 and ch2 float values (unit mV). Supports %f (float), %d (integer), %x (hex), etc. Channel names and units are auto-parsed.</td></tr>
+<tr><td>Auto Recognize</td><td>Button</td><td>Analyzes the most recent data lines received from the communication interface, infers the printf-style format string, and writes it into the format input box on the left. It only fills the format box without auto-applying — click "Apply & Redraw" on the right to re-parse and redraw with the new format. Useful when the data format is unknown and you need a quick parsing scheme.</td></tr>
 <tr><td>Apply & Redraw</td><td>Button</td><td>Apply the data format setting, re-parse existing data, and redraw waveforms.</td></tr>
 <tr><td>Recognized Channels</td><td>Label</td><td>Shows the list of channels recognized in the current data format (e.g., "8 numeric channels recognized: ch1, ch2, ..., ch8").</td></tr>
 </table>

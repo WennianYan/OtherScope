@@ -20,6 +20,7 @@
 
 - **8 physical channels (ch1–ch8) + 4 math channels (M1–M4)** — arbitrary expressions such as `ch1+ch2`, `sin(ch1)*3`
 - **Serial & network acquisition** — RS-232 over USB, TCP client/server, printf-style and raw/HEX framing
+- **Auto format recognition** — one-click analysis of the most recent received lines infers the printf-style format string into the format box; then "Apply & Replot" renders the waveform
 - **Real oscilloscope coupling** — DC/AC per channel, with AC implemented as a true coupling-capacitor high-pass (DC removal), matching the physics of a real scope
 - **AutoSet** — one-click auto configuration of timebase, per-channel vertical gain/position and trigger (Keysight/Tektronix style channel-separated autoscale)
 - **Trigger engine** — edge (rising/falling), pulse-width, runts, timeout & transition; 50% auto level

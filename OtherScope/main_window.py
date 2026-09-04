@@ -39,7 +39,7 @@ from .translations import tr, trf, set_language, current_lang, LANG_ZH, LANG_EN
 from .state_save import AppConfig, ScopeState
 from .app_theme import ThemeManager, THEME_DARK, THEME_LIGHT
 from .user_manual import manual_html
-from .printf_parser import FrameParser
+from .printf_parser import FrameParser, recognize_printf_format
 from .serial_source import (BAUDRATES, STOP_BITS,
                              list_serial_ports, SerialSource, VirtualSource,
                              NetSource, DEMO_FORMAT)
@@ -879,6 +879,16 @@ class MainWindow(QMainWindow):
         row_layout.addWidget(self.lb_fmt_label)
         self.fmt_edit = QLineEdit(DEMO_FORMAT)
         row_layout.addWidget(self.fmt_edit, 1)
+        # 自动识别：分析当前通讯接口收到的文本行，推断 printf 格式串并写入格式框
+        self.btn_auto_recog = QPushButton()
+        self.btn_auto_recog.clicked.connect(self._auto_recognize_format)
+        install_hover_help(self.btn_auto_recog,
+            lambda: "<b>自动识别</b><br>分析当前通讯接口最近收到的数据行，"
+                    "自动推断其中的 printf 风格格式串，并写入左侧格式输入框。<br>"
+                    "识别结果<b>不自动应用</b>：点击右侧「应用并重绘」后按新格式"
+                    "重新解析并绘制波形。<br><span style='color:#e09600;'>"
+                    "<b>效果：</b></span>格式框内容被识别出的格式串替换。")
+        row_layout.addWidget(self.btn_auto_recog)
         self.btn_apply_fmt = QPushButton()
         self.btn_apply_fmt.clicked.connect(self._apply_format)
         row_layout.addWidget(self.btn_apply_fmt)
@@ -1815,6 +1825,27 @@ class MainWindow(QMainWindow):
         return max(1, int(round(self.sp_period.value())))
 
     # ---------------------------------------------------------------- 格式/波形
+    def _auto_recognize_format(self):
+        """自动识别当前通讯接口收到的有规律数据格式，写入格式输入框。
+
+        分析最近收到的文本行（self._raw_lines），推断 printf 风格格式串并
+        填入 self.fmt_edit；仅写入格式框、不自动应用——用户点击「应用并重绘」
+        后按新格式重新解析并绘制波形（该按钮功能保持不变）。
+        """
+        lines = [ln for _ts, ln in self._raw_lines]
+        fmt, ok, total = recognize_printf_format(lines)
+        if not fmt:
+            if total == 0:
+                self.lb_fmt_info.setText(tr("wave.auto_recognize_no_data"))
+            else:
+                self.lb_fmt_info.setText(tr("wave.auto_recognize_fail"))
+            self.fmt_edit.setFocus()
+            return
+        self.fmt_edit.setText(fmt)
+        self.lb_fmt_info.setText(
+            trf("wave.auto_recognize_ok", fmt=fmt, ok=ok, total=total))
+        self.fmt_edit.setFocus()
+
     def _apply_format(self):
         format_str = self.fmt_edit.text().strip()
         # Bug W 修复：数据按真实换行切行（_extract_timed_lines 已去掉行尾
@@ -1976,6 +2007,7 @@ class MainWindow(QMainWindow):
 
         # 波形/格式
         self.lb_fmt_label.setText(tr("wave.fmt_label"))
+        self.btn_auto_recog.setText(tr("wave.auto_recognize"))
         self.btn_apply_fmt.setText(tr("wave.apply"))
         self._refresh_fmt_info()
 

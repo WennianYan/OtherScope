@@ -223,6 +223,10 @@ STRINGS = {
 
     # 波形 / 格式
     "wave.fmt_label": {"en": "Data format (printf style)", "zh": "数据格式（printf 风格）"},
+    "wave.auto_recognize": {"en": "Auto Recognize", "zh": "自动识别"},
+    "wave.auto_recognize_no_data": {"en": "No received data yet — open the serial/network interface first", "zh": "暂无接收数据，请先打开串口/网口"},
+    "wave.auto_recognize_fail": {"en": "No regular numeric format recognized in received data", "zh": "未在接收数据中识别到有规律的数值格式"},
+    "wave.auto_recognize_ok": {"en": "Auto-recognized format: {fmt}  ({ok}/{total} lines matched)", "zh": "已自动识别格式：{fmt}（{ok}/{total} 行匹配）"},
     "wave.apply": {"en": "Apply & Replot", "zh": "应用并重绘"},
     "wave.no_channel": {"en": "No numeric channel found (%f/%d/%x …)", "zh": "格式串中未找到数值通道（%f/%d/%x 等）"},
     "wave.chan_count": {"en": "{n} numeric channels detected: {names}", "zh": "已识别 {n} 个数值通道：{names}"},

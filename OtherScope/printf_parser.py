@@ -19,6 +19,131 @@ _CONV_RE = re.compile(
     r"(?P<length>hh|ll|h|l|j|z|t|L)?(?P<conv>[diuoxXfFeEgGaAcspn%])"
 )
 
+# ---------------------------------------------------------------------------
+# 自动识别：从一批接收文本行推断 printf 格式串
+# ---------------------------------------------------------------------------
+# 数值 token 分类正则（按优先级：十六进制 > 浮点 > 科学计数 > 整数）。
+# 覆盖 0x1A / -0x2B、120.3 / .5 / -20.、1.5e-3、25e3、-20、42 等常见下位机输出。
+# 前置 (?<![A-Za-z0-9_]) 边界：排除 "ch1" / "adc0" 等标识符里的序号数字被误判为
+# 数值字段（"ch1:120.3mv" 中只有 120.3 是数据，"ch1" 是通道名前缀）。
+_AUTO_NUM_RE = re.compile(
+    r"(?<![A-Za-z0-9_])"
+    r"(?:(?P<hex>[+-]?0[xX][0-9a-fA-F]+)"
+    r"|(?P<flt>[+-]?(?:\d+\.\d*|\.\d+)(?:[eE][+-]?\d+)?)"
+    r"|(?P<exp>[+-]?\d+[eE][+-]?\d+)"
+    r"|(?P<int>[+-]?\d+))"
+)
+
+
+def _tokenize_line(line: str):
+    """把一行拆成交替 token：('lit', 字面量) / ('num', 数值文本)。
+
+    返回 (pieces, num_tokens)：
+    - pieces：交替序列 ``[lit0, num0, lit1, num1, ..., litK]``（K 个数值字段，
+      首尾均为字面量，可为空串）；
+    - num_tokens：按出现顺序的数值文本列表。
+    """
+    pieces = []
+    toks = []
+    last_end = 0
+    for m in _AUTO_NUM_RE.finditer(line):
+        pieces.append(("lit", line[last_end:m.start()]))
+        pieces.append(("num", m.group()))
+        toks.append(m.group())
+        last_end = m.end()
+    pieces.append(("lit", line[last_end:]))
+    return pieces, toks
+
+
+def _lcp(strings):
+    """多字符串的最长公共前缀；空列表返回空串。"""
+    if not strings:
+        return ""
+    s0 = min(strings, key=len)
+    for i, ch in enumerate(s0):
+        for s in strings:
+            if s[i] != ch:
+                return s0[:i]
+    return s0
+
+
+def recognize_printf_format(lines, max_sample: int = 200,
+                            min_success_ratio: float = 0.3):
+    """从一批文本行自动推断 printf 格式串（用于「自动识别」按钮）。
+
+    策略：
+    1. 取最近 ``max_sample`` 行非空文本，逐行抽取数值 token（十六进制/浮点/
+       科学计数/整数），记录每行的字段数；
+    2. 以出现次数最多的字段数为「众数」，仅取字段数=众数的行做一致样本；
+    3. 逐列判定转换说明符：全为整数→``%d``；全为十六进制→``%x``；其余→``%f``；
+    4. 各字面量位置取一致样本的**最长公共前缀**（保留常量文本/通道名前缀/单位）；
+    5. 组装格式串后用 :class:`FrameParser` 回验：须能解析
+       ``>= min_success_ratio`` 的样本行且至少识别出 1 个数值通道，才算成功。
+
+    Args:
+        lines: 原始接收文本行（可含空行/噪声，函数内部自行过滤）。
+        max_sample: 参与分析的最近行数上限。
+        min_success_ratio: 回验通过所需的样本解析成功率（0~1）。
+
+    Returns:
+        ``(format_str, ok_count, total_count)``：
+        - 识别成功时 format_str 为 printf 格式串，否则为 None；
+        - ok_count 为回验中成功解析出数值通道的样本行数；
+        - total_count 为参与分析的样本行总数。
+    """
+    clean = [ln.rstrip() for ln in lines if ln and ln.strip()]
+    sample = clean[-max_sample:]
+    if not sample:
+        return None, 0, 0
+
+    rows = []
+    for ln in sample:
+        pieces, toks = _tokenize_line(ln)
+        if toks:
+            rows.append((pieces, toks))
+    if not rows:
+        return None, 0, len(sample)
+
+    # 字段数众数 → 只保留字段数一致的"规律行"
+    counts = {}
+    for _pieces, toks in rows:
+        counts[len(toks)] = counts.get(len(toks), 0) + 1
+    mode = max(counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+    consistent = [(p, t) for p, t in rows if len(t) == mode]
+    if not consistent:
+        return None, 0, len(sample)
+
+    # 逐列判定转换说明符
+    specs = []
+    for col in range(mode):
+        col_toks = [t[col] for _p, t in consistent]
+        if all(re.fullmatch(r"[+-]?0[xX][0-9a-fA-F]+", x) for x in col_toks):
+            specs.append("%x")
+        elif all(re.fullmatch(r"[+-]?\d+", x) for x in col_toks):
+            specs.append("%d")
+        else:
+            specs.append("%f")
+
+    # 字面量位置取最长公共前缀（pieces 中 literal_j 位于索引 2*j）
+    lits = []
+    for j in range(mode + 1):
+        seg = [p[2 * j][1] if len(p) > 2 * j else "" for p, _ in consistent]
+        lits.append(_lcp(seg))
+
+    parts = []
+    for j in range(mode):
+        parts.append(lits[j])
+        parts.append(specs[j])
+    parts.append(lits[mode])
+    fmt = "".join(parts)
+
+    # 用真实解析器回验：识别出的格式必须能解析足够比例的样本行
+    parser = FrameParser(fmt)
+    ok = sum(1 for ln in sample if parser.parse(ln))
+    if ok and parser.num_channels > 0 and ok / len(sample) >= min_success_ratio:
+        return fmt, ok, len(sample)
+    return None, ok, len(sample)
+
 _FLOAT = r"[+-]?(?:(?i:inf(?:inity)?|nan)|[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?"
 _HEX_FLOAT = (r"[-+]?(?:(?i:inf(?:inity)?|nan)"
               r"|0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)[pP][-+]?[0-9]+)")

@@ -1,0 +1,203 @@
+name: Build OtherScope Single-File Binaries
+
+# 三平台单文件自动构建 + 自动发布 GitHub Release（带平台标注）
+# 触发：
+#   - 推送 tag（v1.0.0 或 V1.0.0 均可，字符类 [vV]* 大小写兼容）→ 构建 + 发布
+#   - 手动触发 workflow_dispatch → 仅构建验证，不发布（除非勾选"创建草稿 Release"）
+# 产物（文件名直接带平台标识，便于用户按系统选择）：
+#   - Windows: OtherScope-Windows.exe
+#   - macOS:   OtherScope-macOS.zip（内含 OtherScope.app）
+#   - Linux:   OtherScope-Linux
+# Release 正文自动生成"平台 → 文件"对照表；更新时同步清理旧资产、幂等覆盖。
+# 健壮性：contents: write 权限、按 tag 并发锁、附件防呆收集、3 次重试、草稿模式。
+on:
+  workflow_dispatch:
+    inputs:
+      create_draft:
+        description: '创建草稿 Release（人工审核后手动发布）'
+        type: boolean
+        default: false
+  push:
+    tags:
+      - '[vV]*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt pyinstaller
+      - name: Build single-file exe
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name OtherScope --paths . main.py
+      - name: Rename with platform tag
+        run: move dist\OtherScope.exe dist\OtherScope-Windows.exe
+      - uses: actions/upload-artifact@v6
+        with:
+          name: OtherScope-windows
+          path: dist/OtherScope-Windows.exe
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python3 -m pip install -r requirements.txt pyinstaller
+      - name: Build app
+        run: python3 -m PyInstaller --noconfirm --clean --onefile --windowed --name OtherScope --paths . main.py
+      - name: Package macOS app (bundle -> zip, platform-tagged)
+        run: |
+          cd dist
+          if [ -d OtherScope.app ]; then
+            zip -rq OtherScope-macOS.zip OtherScope.app
+          else
+            cp OtherScope OtherScope-macOS.zip
+          fi
+      - uses: actions/upload-artifact@v6
+        with:
+          name: OtherScope-macos
+          path: dist/OtherScope-macOS.zip
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install system libs
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
+      - name: Install dependencies
+        run: python3 -m pip install -r requirements.txt pyinstaller
+      - name: Build single-file binary
+        run: python3 -m PyInstaller --noconfirm --clean --onefile --windowed --name OtherScope --paths . main.py
+      - name: Rename with platform tag
+        run: mv dist/OtherScope dist/OtherScope-Linux
+      - uses: actions/upload-artifact@v6
+        with:
+          name: OtherScope-linux
+          path: dist/OtherScope-Linux
+
+  release:
+    name: Create GitHub Release
+    needs: [build-windows, build-macos, build-linux]
+    # 仅 tag 推送时发布；手动触发默认只构建验证，可选草稿发布
+    if: >
+      startsWith(github.ref, 'refs/tags/') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.create_draft == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: release-assets
+      - name: List release assets
+        run: find release-assets -type f
+      - name: Write platform release notes
+        run: |
+          cat > release-notes.md <<'NOTEEOF'
+          ## OtherScope v1.0.0
+
+          **其他示波器（OtherScope）** —— 集通讯调试终端（串口/网口）+ 实时波形示波器 + FFT 频谱分析 + 数据分布图统计于一体的专业桌面工程工具。纯本地运行，无广告，无网络依赖。
+
+          **A professional desktop tool: serial/network terminal + real-time oscilloscope + FFT spectrum + distribution statistics. 100% local, no ads, no network dependency.**
+
+          ---
+
+          ### 📥 下载 / Download — 请根据您的操作系统选择（Select by your OS）
+
+          | 平台 Platform | 文件 File | 使用方式 How to use |
+          |---|---|---|
+          | 🪟 **Windows** | `OtherScope-Windows.exe` | 双击直接运行 / Double-click to run |
+          | 🍎 **macOS** | `OtherScope-macOS.zip` | 解压后双击 `OtherScope.app` / Unzip & double-click `OtherScope.app` |
+          | 🐧 **Linux** | `OtherScope-Linux` | 终端执行 `chmod +x OtherScope-Linux && ./OtherScope-Linux` |
+
+          > 首次运行若提示缺少系统库，程序会自动下载安装并重启（自举修复），异常以弹窗提醒。
+          > On first run, missing system libraries are auto-installed and the app restarts automatically.
+          NOTEEOF
+          echo "release-notes.md 已生成"
+      - name: Create / update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          CREATE_DRAFT: ${{ github.event.inputs.create_draft }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          REPO="${{ github.repository }}"
+          echo "== 事件类型: ${EVENT_NAME} =="
+          echo "== 发布版本: ${TAG} =="
+          echo "== 仓库: ${REPO} =="
+
+          # 收集附件：先列出文件，避免通配符在无匹配时把字面路径传给 gh
+          ASSETS=()
+          for d in OtherScope-windows OtherScope-macos OtherScope-linux; do
+            if [ -d "release-assets/${d}" ]; then
+              echo "== ${d} 目录内容 =="
+              ls -la "release-assets/${d}"
+              for f in "release-assets/${d}"/*; do
+                [ -e "$f" ] && ASSETS+=("$f")
+              done
+            else
+              echo "!! 缺失附件目录: release-assets/${d}"
+            fi
+          done
+          echo "== 共收集 ${#ASSETS[@]} 个附件 =="
+          if [ "${#ASSETS[@]}" -eq 0 ]; then
+            echo "!! 未找到任何构建附件，终止发布（请检查三个 build job 是否成功）。"
+            exit 1
+          fi
+
+          # 草稿模式：仅手动触发且勾选时生效；正式 tag 始终直接发布
+          DRAFT_FLAG=""
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ] && [ "${CREATE_DRAFT}" = "true" ]; then
+            DRAFT_FLAG="--draft"
+            echo "== 草稿模式：将创建草稿 Release =="
+          fi
+
+          publish() {
+            if gh release view "${TAG}" --repo "${REPO}" >/dev/null 2>&1; then
+              echo "== Release ${TAG} 已存在：清理旧资产 + 更新正文 + 覆盖附件 =="
+              # 清理历史平台资产（防止旧文件名残留）
+              for old in OtherScope OtherScope.exe OtherScope-macos.zip; do
+                if gh release view "${TAG}" --repo "${REPO}" --json assets \
+                     -q '.assets[].name' | grep -qx "${old}"; then
+                  echo "    删除旧资产: ${old}"
+                  gh release delete-asset "${TAG}" "${old}" --repo "${REPO}" --yes
+                fi
+              done
+              gh release edit "${TAG}" --repo "${REPO}" --notes-file release-notes.md
+              gh release upload "${TAG}" "${ASSETS[@]}" --repo "${REPO}" --clobber
+            else
+              echo "== 创建 Release ${TAG} =="
+              gh release create "${TAG}" "${ASSETS[@]}" --repo "${REPO}" \
+                --title "OtherScope ${TAG}" --notes-file release-notes.md ${DRAFT_FLAG}
+            fi
+          }
+
+          for attempt in 1 2 3; do
+            echo "== 发布尝试 ${attempt}/3 =="
+            if publish; then
+              echo "== 发布成功 =="
+              exit 0
+            fi
+            echo "!! 第 ${attempt} 次尝试失败，2 秒后重试..."
+            sleep 2
+          done
+          echo "!! 连续 3 次发布失败，请检查上方日志与仓库权限。"
+          exit 1

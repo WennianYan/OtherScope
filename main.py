@@ -26,7 +26,13 @@ def _enable_crash_log():
 
 
 def _wait_key():
-    """等待用户按任意键（跨平台），避免启动失败时终端闪退。"""
+    """等待用户按任意键（跨平台），避免启动失败时终端闪退。
+
+    自动化启动模式（环境变量 OTHERSCOPE_AUTO_LAUNCH=1）下不等待，
+    让外层 auto_launcher.py 的重试循环继续工作。
+    """
+    if os.environ.get("OTHERSCOPE_AUTO_LAUNCH") == "1":
+        return
     print("\n按任意键退出...")
     try:
         if os.name == "nt":

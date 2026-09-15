@@ -385,10 +385,6 @@ def main() -> int:
     _sep()
     print()
 
-    # 0. Pre-flight
-    _status("预检查", "Pre-check", "验证运行环境...", "Verifying runtime environment...")
-    if not _check_python_version():
-        return 1
     script_dir = os.path.dirname(os.path.abspath(__file__))
     main_py = os.path.join(script_dir, "main.py")
     if not os.path.exists(main_py):
@@ -396,6 +392,28 @@ def main() -> int:
             f"  [FATAL] main.py 不存在: {main_py}",
             f"  [FATAL] main.py not found: {main_py}",
         ), flush=True)
+        return 1
+
+    # ===== 乐观启动：先直接尝试启动 =====
+    _status("快速启动", "Quick start", "直接尝试启动...", "Trying direct launch...")
+    rc = launch_main()
+    if rc == 0:
+        print()
+        _sep()
+        print(_t("  程序正常退出。", "  Program exited normally."), flush=True)
+        return 0
+
+    # ===== 启动失败，进入诊断模式 =====
+    print()
+    _sep()
+    print(_t("  首次启动失败，进入诊断模式...", "  First launch failed. Entering diagnostic mode..."))
+    print(_t("  正在检查依赖并修复...", "  Checking dependencies and fixing..."))
+    _sep()
+    print()
+
+    # 0. Pre-flight
+    _status("预检查", "Pre-check", "验证运行环境...", "Verifying runtime environment...")
+    if not _check_python_version():
         return 1
     print(_t("  环境检查通过。", "  Environment check passed."), flush=True)
     print()
@@ -470,7 +488,6 @@ def main() -> int:
             return 1
 
     return 0
-
 
 def _safe_main() -> int:
     """Wrap main() to handle BrokenPipeError and other unexpected crashes."""
